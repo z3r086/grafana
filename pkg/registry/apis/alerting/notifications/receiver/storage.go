@@ -74,7 +74,7 @@ func NewStorage(
 		if err := s.CompleteWithOptions(options); err != nil {
 			return nil, err
 		}
-		return grafanarest.NewDualWriter(desiredMode, legacyStore, storage{Store: s}, reg), nil
+		return grafanarest.NewDualWriter(desiredMode, legacyStore, storage{Store: s}, reg, model.GROUP, "receivers", namespacer), nil
 	}
 	return legacyStore, nil
 }

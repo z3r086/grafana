@@ -513,7 +513,7 @@ func (d *DualWriterMode2) Sync(ctx context.Context) error {
 		// - existing in both legacy and storage, but objects are different, or
 		// - if it's missing from storage
 		if item.objLegacy != nil &&
-			((item.objStorage != nil && !d.Compare(item.objLegacy, item.objStorage)) || (item.objStorage == nil)) {
+			((item.objStorage != nil && !Compare(item.objLegacy, item.objStorage)) || (item.objStorage == nil)) {
 			objInfo := rest.DefaultUpdatedObjectInfo(item.objLegacy, []rest.TransformFunc{}...)
 			res, _, err := d.Storage.Update(ctx,
 				name,
