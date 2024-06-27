@@ -77,6 +77,7 @@ type DualWriter interface {
 	Storage
 	LegacyStorage
 	Mode() DualWriterMode
+	Sync(context.Context) error
 }
 
 type DualWriterMode int
@@ -98,7 +99,7 @@ const (
 
 // TODO: make this function private as there should only be one public way of setting the dual writing mode
 // NewDualWriter returns a new DualWriter.
-func NewDualWriter(mode DualWriterMode, legacy LegacyStorage, storage Storage, reg prometheus.Registerer) DualWriter {
+func NewDualWriter(mode DualWriterMode, legacy LegacyStorage, storage Storage, reg prometheus.Registerer, group string, resource string, namespacer request.NamespaceMapper) DualWriter {
 	metrics := &dualWriterMetrics{}
 	metrics.init(reg)
 	switch mode {
@@ -109,7 +110,7 @@ func NewDualWriter(mode DualWriterMode, legacy LegacyStorage, storage Storage, r
 		return newDualWriterMode1(legacy, storage, metrics)
 	case Mode2:
 		// write to both, read from storage but use legacy as backup
-		return newDualWriterMode2(legacy, storage, metrics)
+		return newDualWriterMode2(legacy, storage, metrics, group, resource, namespacer)
 	case Mode3:
 		// write to both, read from storage only
 		return newDualWriterMode3(legacy, storage, metrics)
@@ -152,6 +153,9 @@ func SetDualWritingMode(
 	entity string,
 	desiredMode DualWriterMode,
 	reg prometheus.Registerer,
+	group string,
+	resource string,
+	namespacer request.NamespaceMapper,
 ) (DualWriter, error) {
 	toMode := map[string]DualWriterMode{
 		// It is not possible to initialize a mode 0 dual writer. Mode 0 represents
@@ -186,6 +190,8 @@ func SetDualWritingMode(
 		}
 	}
 
+	dualWriter := NewDualWriter(currentMode, legacy, storage, reg, group, resource, namespacer)
+
 	// Desired mode is 2 and current mode is 1
 	if (desiredMode == Mode2) && (currentMode == Mode1) {
 		// This is where we go through the different gates to allow the instance to migrate from mode 1 to mode 2.
@@ -208,9 +214,17 @@ func SetDualWritingMode(
 		}
 	}
 
+	if desiredMode == currentMode {
+		// TODO: put it behind feature flag
+		err = dualWriter.Sync(ctx)
+		if err != nil {
+			return nil, errDualWriterSetCurrentMode
+		}
+	}
+
 	// 	#TODO add support for other combinations of desired and current modes
 
-	return NewDualWriter(currentMode, legacy, storage, reg), nil
+	return dualWriter, nil
 }
 
 var defaultConverter = runtime.UnstructuredConverter(runtime.DefaultUnstructuredConverter)

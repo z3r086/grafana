@@ -9,25 +9,34 @@ import (
 	metainternalversion "k8s.io/apimachinery/pkg/apis/meta/internalversion"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apiserver/pkg/endpoints/request"
 	"k8s.io/apiserver/pkg/registry/rest"
 	"k8s.io/klog/v2"
 
+	"github.com/grafana/grafana/pkg/apimachinery/identity"
 	"github.com/grafana/grafana/pkg/apimachinery/utils"
+	grafanarequest "github.com/grafana/grafana/pkg/services/apiserver/endpoints/request"
 )
 
 type DualWriterMode2 struct {
 	Storage Storage
 	Legacy  LegacyStorage
 	*dualWriterMetrics
-	Log klog.Logger
+	Log        klog.Logger
+	Group      string
+	Resource   string
+	Namespacer grafanarequest.NamespaceMapper
 }
 
 const mode2Str = "2"
 
 // NewDualWriterMode2 returns a new DualWriter in mode 2.
 // Mode 2 represents writing to LegacyStorage and Storage and reading from LegacyStorage.
-func newDualWriterMode2(legacy LegacyStorage, storage Storage, dwm *dualWriterMetrics) *DualWriterMode2 {
-	return &DualWriterMode2{Legacy: legacy, Storage: storage, Log: klog.NewKlogr().WithName("DualWriterMode2"), dualWriterMetrics: dwm}
+func newDualWriterMode2(legacy LegacyStorage, storage Storage, dwm *dualWriterMetrics, group string, resource string, namespacer grafanarequest.NamespaceMapper) *DualWriterMode2 {
+	return &DualWriterMode2{
+		Legacy: legacy, Storage: storage, Log: klog.NewKlogr().WithName("DualWriterMode2"), dualWriterMetrics: dwm,
+		Group: group, Resource: resource, Namespacer: namespacer,
+	}
 }
 
 // Mode returns the mode of the dual writer.
@@ -401,5 +410,141 @@ func enrichLegacyObject(originalObj, returnedObj runtime.Object) error {
 
 	accessorReturned.SetResourceVersion(accessorOriginal.GetResourceVersion())
 	accessorReturned.SetUID(accessorOriginal.GetUID())
+	return nil
+}
+
+func getSyncRequester(orgId int64) *identity.StaticRequester {
+	return &identity.StaticRequester{
+		UserID:         1,
+		OrgID:          orgId,
+		Name:           "admin",
+		Login:          "admin",
+		OrgRole:        identity.RoleAdmin,
+		IsGrafanaAdmin: true,
+		Permissions: map[int64]map[string][]string{
+			orgId: {
+				"*": {"*"}, // all resources, all scopes
+			},
+		},
+	}
+}
+
+func (d *DualWriterMode2) getList(ctx context.Context, obj rest.Lister, listOptions *metainternalversion.ListOptions) ([]runtime.Object, error) {
+	ll, err := obj.List(ctx, listOptions)
+	if err != nil {
+		return nil, err
+	}
+
+	return meta.ExtractList(ll)
+}
+
+type syncItem struct {
+	name       string
+	objStorage runtime.Object
+	objLegacy  runtime.Object
+	equals     bool
+}
+
+// Sync ...
+func (d *DualWriterMode2) Sync(ctx context.Context) error {
+	orgId := int64(1)
+
+	log := d.Log.WithValues("method", "sync", "mode", "2")
+	ctx = klog.NewContext(ctx, log)
+	ctx = identity.WithRequester(ctx, getSyncRequester(orgId))
+	ctx = request.WithNamespace(ctx, d.Namespacer(orgId))
+
+	ctx = request.WithRequestInfo(ctx, &request.RequestInfo{
+		APIGroup:  d.Group,
+		Resource:  d.Resource,
+		Name:      "",
+		Namespace: d.Namespacer(orgId),
+	})
+
+	legacyList, err := d.getList(ctx, d.Legacy, nil)
+	if err != nil {
+		log.Error(err, "unable to extract list from legacy storage")
+		return err
+	}
+
+	storageList, err := d.getList(ctx, d.Storage, &metainternalversion.ListOptions{})
+	if err != nil {
+		log.Error(err, "unable to extract list from storage")
+		return err
+	}
+
+	itemsByName := map[string]syncItem{}
+	for _, obj := range legacyList {
+		accessor, err := utils.MetaAccessor(obj)
+		if err != nil {
+			log.Error(err, "error retrieving accessor data for object from legacy storage")
+			continue
+		}
+		name := accessor.GetName()
+
+		item, ok := itemsByName[name]
+		if !ok {
+			item = syncItem{}
+		}
+		item.name = name
+		item.objLegacy = obj
+		itemsByName[name] = item
+	}
+
+	for _, obj := range storageList {
+		accessor, err := utils.MetaAccessor(obj)
+		if err != nil {
+			log.Error(err, "error retrieving accessor data for object from storage")
+			continue
+		}
+		name := accessor.GetName()
+
+		item, ok := itemsByName[name]
+		if !ok {
+			item = syncItem{}
+		}
+		item.name = name
+		item.objStorage = obj
+		itemsByName[name] = item
+	}
+
+	for name, item := range itemsByName {
+		// upsert if:
+		// - existing in both legacy and storage, but objects are different, or
+		// - if it's missing from storage
+		if item.objLegacy != nil &&
+			((item.objStorage != nil && !d.Compare(item.objLegacy, item.objStorage)) || (item.objStorage == nil)) {
+			objInfo := rest.DefaultUpdatedObjectInfo(item.objLegacy, []rest.TransformFunc{}...)
+			res, _, err := d.Storage.Update(ctx,
+				name,
+				objInfo,
+				func(ctx context.Context, obj runtime.Object) error { return nil },
+				func(ctx context.Context, obj, old runtime.Object) error { return nil },
+				true, // force creation
+				&metav1.UpdateOptions{},
+			)
+			if err != nil {
+				log.WithValues("object", res).Error(err, "could not update in storage")
+			}
+		}
+
+		// delete if object does not exists on legacy but exists on storage
+		if item.objLegacy == nil && item.objStorage != nil {
+			ctx = request.WithRequestInfo(ctx, &request.RequestInfo{
+				APIGroup:  d.Group,
+				Resource:  d.Resource,
+				Name:      name,
+				Namespace: d.Namespacer(orgId),
+			})
+
+			deletedS, _, err := d.Storage.Delete(ctx, name, nil, &metav1.DeleteOptions{})
+			if err != nil {
+				if !apierrors.IsNotFound(err) {
+					log.WithValues("objectList", deletedS).Error(err, "could not delete from storage")
+				}
+			}
+		}
+	}
+
 	return nil
 }
