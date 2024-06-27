@@ -415,6 +415,7 @@ func enrichLegacyObject(originalObj, returnedObj runtime.Object) error {
 
 func getSyncRequester(orgId int64) *identity.StaticRequester {
 	return &identity.StaticRequester{
+		Namespace:      identity.NamespaceServiceAccount, // system:apiserver
 		UserID:         1,
 		OrgID:          orgId,
 		Name:           "admin",
