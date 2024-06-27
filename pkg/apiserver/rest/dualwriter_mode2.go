@@ -515,6 +515,25 @@ func (d *DualWriterMode2) Sync(ctx context.Context) error {
 		// - if it's missing from storage
 		if item.objLegacy != nil &&
 			((item.objStorage != nil && !Compare(item.objLegacy, item.objStorage)) || (item.objStorage == nil)) {
+
+			accessor, err := utils.MetaAccessor(item.objLegacy)
+			if err != nil {
+				log.Error(err, "error retrieving accessor data for object from storage")
+				continue
+			}
+			accessor.SetResourceVersionInt64(0)
+			accessor.SetUID("")
+
+			if item.objStorage != nil {
+				accessorStorage, err := utils.MetaAccessor(item.objStorage)
+				if err != nil {
+					log.Error(err, "error retrieving accessor data for object from storage")
+					continue
+				}
+				accessor.SetResourceVersion(accessorStorage.GetResourceVersion())
+				accessor.SetUID(accessorStorage.GetUID())
+			}
+
 			objInfo := rest.DefaultUpdatedObjectInfo(item.objLegacy, []rest.TransformFunc{}...)
 			res, _, err := d.Storage.Update(ctx,
 				name,
