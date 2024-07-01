@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"testing"
 
+	playlist "github.com/grafana/grafana/pkg/apis/playlist/v0alpha1"
+	"github.com/grafana/grafana/pkg/infra/kvstore"
+	"github.com/grafana/grafana/pkg/services/apiserver/endpoints/request"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -40,13 +43,16 @@ func TestSetDualWritingMode(t *testing.T) {
 		s := (Storage)(nil)
 		m := &mock.Mock{}
 
+		m.On("List", mock.Anything, mock.Anything).Return(exampleList, nil)
+		m.On("List", mock.Anything, mock.Anything).Return(anotherList, nil)
+
 		ls := legacyStoreMock{m, l}
 		us := storageMock{m, s}
 
 		kvStore := &fakeNamespacedKV{data: make(map[string]string), namespace: "storage.dualwriting." + tt.stackID}
 
 		p := prometheus.NewRegistry()
-		dw, err := SetDualWritingMode(context.Background(), kvStore, ls, us, "playlist.grafana.app/v0alpha1", tt.desiredMode, p)
+		dw, err := SetDualWritingMode(context.Background(), kvStore, ls, us, playlist.GROUPRESOURCE, tt.desiredMode, p, "group", "resource", request.GetNamespaceMapper(nil))
 		assert.NoError(t, err)
 		assert.Equal(t, tt.expectedMode, dw.Mode())
 

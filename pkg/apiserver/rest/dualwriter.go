@@ -190,8 +190,6 @@ func SetDualWritingMode(
 		}
 	}
 
-	dualWriter := NewDualWriter(currentMode, legacy, storage, reg, group, resource, namespacer)
-
 	// Desired mode is 2 and current mode is 1
 	if (desiredMode == Mode2) && (currentMode == Mode1) {
 		// This is where we go through the different gates to allow the instance to migrate from mode 1 to mode 2.
@@ -214,6 +212,9 @@ func SetDualWritingMode(
 		}
 	}
 
+	// 	#TODO add support for other combinations of desired and current modes
+	dualWriter := NewDualWriter(currentMode, legacy, storage, reg, group, resource, namespacer)
+
 	if desiredMode == currentMode {
 		// TODO: put it behind feature flag
 		err = dualWriter.Sync(ctx)
@@ -221,8 +222,6 @@ func SetDualWritingMode(
 			return nil, errDualWriterSetCurrentMode
 		}
 	}
-
-	// 	#TODO add support for other combinations of desired and current modes
 
 	return dualWriter, nil
 }

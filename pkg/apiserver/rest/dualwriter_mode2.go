@@ -462,7 +462,7 @@ func (d *DualWriterMode2) Sync(ctx context.Context) error {
 		Namespace: d.Namespacer(orgId),
 	})
 
-	legacyList, err := d.getList(ctx, d.Legacy, nil)
+	legacyList, err := d.getList(ctx, d.Legacy, &metainternalversion.ListOptions{})
 	if err != nil {
 		log.Error(err, "unable to extract list from legacy storage")
 		return err
