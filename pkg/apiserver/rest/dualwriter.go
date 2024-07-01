@@ -215,7 +215,7 @@ func SetDualWritingMode(
 	// 	#TODO add support for other combinations of desired and current modes
 	dualWriter := NewDualWriter(currentMode, legacy, storage, reg, group, resource, namespacer)
 
-	if desiredMode == currentMode {
+	if (desiredMode == Mode3) && (currentMode == Mode2) {
 		// TODO: put it behind feature flag
 		err = dualWriter.Sync(ctx)
 		if err != nil {
