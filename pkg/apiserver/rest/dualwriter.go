@@ -11,6 +11,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apiserver/pkg/endpoints/request"
 	"k8s.io/apiserver/pkg/registry/rest"
 	"k8s.io/klog/v2"
 )
@@ -99,7 +100,7 @@ const (
 
 // TODO: make this function private as there should only be one public way of setting the dual writing mode
 // NewDualWriter returns a new DualWriter.
-func NewDualWriter(mode DualWriterMode, legacy LegacyStorage, storage Storage, reg prometheus.Registerer, group string, resource string, namespacer func(orgId int64) string) DualWriter {
+func NewDualWriter(mode DualWriterMode, legacy LegacyStorage, storage Storage, reg prometheus.Registerer, requestInfo *request.RequestInfo) DualWriter {
 	metrics := &dualWriterMetrics{}
 	metrics.init(reg)
 	switch mode {
@@ -110,7 +111,7 @@ func NewDualWriter(mode DualWriterMode, legacy LegacyStorage, storage Storage, r
 		return newDualWriterMode1(legacy, storage, metrics)
 	case Mode2:
 		// write to both, read from storage but use legacy as backup
-		return newDualWriterMode2(legacy, storage, metrics, group, resource, namespacer)
+		return newDualWriterMode2(legacy, storage, metrics, requestInfo)
 	case Mode3:
 		// write to both, read from storage only
 		return newDualWriterMode3(legacy, storage, metrics)
@@ -153,9 +154,7 @@ func SetDualWritingMode(
 	entity string,
 	desiredMode DualWriterMode,
 	reg prometheus.Registerer,
-	group string,
-	resource string,
-	namespacer func(orgId int64) string,
+	requestInfo *request.RequestInfo,
 ) (DualWriter, error) {
 	toMode := map[string]DualWriterMode{
 		// It is not possible to initialize a mode 0 dual writer. Mode 0 represents
@@ -213,10 +212,9 @@ func SetDualWritingMode(
 	}
 
 	// 	#TODO add support for other combinations of desired and current modes
-	dualWriter := NewDualWriter(currentMode, legacy, storage, reg, group, resource, namespacer)
+	dualWriter := NewDualWriter(currentMode, legacy, storage, reg, requestInfo)
 
-	if (desiredMode == Mode3) && (currentMode == Mode2) {
-		// TODO: put it behind feature flag
+	if currentMode == Mode2 {
 		err = dualWriter.Sync(ctx)
 		if err != nil {
 			return nil, errDualWriterSetCurrentMode

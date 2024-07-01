@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"k8s.io/apimachinery/pkg/runtime"
+	k8srequest "k8s.io/apiserver/pkg/endpoints/request"
 )
 
 func TestSetDualWritingMode(t *testing.T) {
@@ -49,7 +50,15 @@ func TestSetDualWritingMode(t *testing.T) {
 		kvStore := &fakeNamespacedKV{data: make(map[string]string), namespace: "storage.dualwriting." + tt.stackID}
 
 		p := prometheus.NewRegistry()
-		dw, err := SetDualWritingMode(context.Background(), kvStore, ls, us, "playlist.grafana.app/v0alpha1", tt.desiredMode, p, "group", "resource", func(orgId int64) string { return "default" })
+
+		requestInfo := &k8srequest.RequestInfo{
+			APIGroup:  "group",
+			Resource:  "resource",
+			Name:      "",
+			Namespace: "default",
+		}
+
+		dw, err := SetDualWritingMode(context.Background(), kvStore, ls, us, "playlist.grafana.app/v0alpha1", tt.desiredMode, p, requestInfo)
 		assert.NoError(t, err)
 		assert.Equal(t, tt.expectedMode, dw.Mode())
 

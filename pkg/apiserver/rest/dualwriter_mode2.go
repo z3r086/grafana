@@ -21,20 +21,18 @@ type DualWriterMode2 struct {
 	Storage Storage
 	Legacy  LegacyStorage
 	*dualWriterMetrics
-	Log        klog.Logger
-	Group      string
-	Resource   string
-	Namespacer func(orgId int64) string
+	Log         klog.Logger
+	requestInfo *request.RequestInfo
 }
 
 const mode2Str = "2"
 
 // NewDualWriterMode2 returns a new DualWriter in mode 2.
 // Mode 2 represents writing to LegacyStorage and Storage and reading from LegacyStorage.
-func newDualWriterMode2(legacy LegacyStorage, storage Storage, dwm *dualWriterMetrics, group string, resource string, namespacer func(orgId int64) string) *DualWriterMode2 {
+func newDualWriterMode2(legacy LegacyStorage, storage Storage, dwm *dualWriterMetrics, requestInfo *request.RequestInfo) *DualWriterMode2 {
 	return &DualWriterMode2{
 		Legacy: legacy, Storage: storage, Log: klog.NewKlogr().WithName("DualWriterMode2"), dualWriterMetrics: dwm,
-		Group: group, Resource: resource, Namespacer: namespacer,
+		requestInfo: requestInfo,
 	}
 }
 
@@ -451,14 +449,8 @@ func (d *DualWriterMode2) Sync(ctx context.Context) error {
 	log := d.Log.WithValues("method", "sync", "mode", "2")
 	ctx = klog.NewContext(ctx, log)
 	ctx = identity.WithRequester(ctx, getSyncRequester(orgId))
-	ctx = request.WithNamespace(ctx, d.Namespacer(orgId))
-
-	ctx = request.WithRequestInfo(ctx, &request.RequestInfo{
-		APIGroup:  d.Group,
-		Resource:  d.Resource,
-		Name:      "",
-		Namespace: d.Namespacer(orgId),
-	})
+	ctx = request.WithNamespace(ctx, d.requestInfo.Namespace)
+	ctx = request.WithRequestInfo(ctx, d.requestInfo)
 
 	legacyList, err := d.getList(ctx, d.Legacy, &metainternalversion.ListOptions{})
 	if err != nil {
@@ -548,10 +540,10 @@ func (d *DualWriterMode2) Sync(ctx context.Context) error {
 		// delete if object does not exists on legacy but exists on storage
 		if item.objLegacy == nil && item.objStorage != nil {
 			ctx = request.WithRequestInfo(ctx, &request.RequestInfo{
-				APIGroup:  d.Group,
-				Resource:  d.Resource,
+				APIGroup:  d.requestInfo.APIGroup,
+				Resource:  d.requestInfo.Resource,
 				Name:      name,
-				Namespace: d.Namespacer(orgId),
+				Namespace: d.requestInfo.Namespace,
 			})
 
 			deletedS, _, err := d.Storage.Delete(ctx, name, nil, &metav1.DeleteOptions{})
