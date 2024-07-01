@@ -15,7 +15,6 @@ import (
 
 	"github.com/grafana/grafana/pkg/apimachinery/identity"
 	"github.com/grafana/grafana/pkg/apimachinery/utils"
-	grafanarequest "github.com/grafana/grafana/pkg/services/apiserver/endpoints/request"
 )
 
 type DualWriterMode2 struct {
@@ -25,14 +24,14 @@ type DualWriterMode2 struct {
 	Log        klog.Logger
 	Group      string
 	Resource   string
-	Namespacer grafanarequest.NamespaceMapper
+	Namespacer func(orgId int64) string
 }
 
 const mode2Str = "2"
 
 // NewDualWriterMode2 returns a new DualWriter in mode 2.
 // Mode 2 represents writing to LegacyStorage and Storage and reading from LegacyStorage.
-func newDualWriterMode2(legacy LegacyStorage, storage Storage, dwm *dualWriterMetrics, group string, resource string, namespacer grafanarequest.NamespaceMapper) *DualWriterMode2 {
+func newDualWriterMode2(legacy LegacyStorage, storage Storage, dwm *dualWriterMetrics, group string, resource string, namespacer func(orgId int64) string) *DualWriterMode2 {
 	return &DualWriterMode2{
 		Legacy: legacy, Storage: storage, Log: klog.NewKlogr().WithName("DualWriterMode2"), dualWriterMetrics: dwm,
 		Group: group, Resource: resource, Namespacer: namespacer,
@@ -443,7 +442,6 @@ type syncItem struct {
 	name       string
 	objStorage runtime.Object
 	objLegacy  runtime.Object
-	equals     bool
 }
 
 // Sync ...
@@ -515,7 +513,6 @@ func (d *DualWriterMode2) Sync(ctx context.Context) error {
 		// - if it's missing from storage
 		if item.objLegacy != nil &&
 			((item.objStorage != nil && !Compare(item.objLegacy, item.objStorage)) || (item.objStorage == nil)) {
-
 			accessor, err := utils.MetaAccessor(item.objLegacy)
 			if err != nil {
 				log.Error(err, "error retrieving accessor data for object from storage")
