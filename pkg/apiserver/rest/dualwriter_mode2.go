@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	serverlocksvc "github.com/grafana/grafana/pkg/infra/serverlock"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metainternalversion "k8s.io/apimachinery/pkg/apis/meta/internalversion"
@@ -15,24 +16,26 @@ import (
 
 	"github.com/grafana/grafana/pkg/apimachinery/identity"
 	"github.com/grafana/grafana/pkg/apimachinery/utils"
+	"github.com/grafana/grafana/pkg/infra/serverlock"
 )
 
 type DualWriterMode2 struct {
 	Storage Storage
 	Legacy  LegacyStorage
 	*dualWriterMetrics
-	Log         klog.Logger
-	requestInfo *request.RequestInfo
+	Log               klog.Logger
+	serverLockService *serverlock.ServerLockService
+	requestInfo       *request.RequestInfo
 }
 
 const mode2Str = "2"
 
 // NewDualWriterMode2 returns a new DualWriter in mode 2.
 // Mode 2 represents writing to LegacyStorage and Storage and reading from LegacyStorage.
-func newDualWriterMode2(legacy LegacyStorage, storage Storage, dwm *dualWriterMetrics, requestInfo *request.RequestInfo) *DualWriterMode2 {
+func newDualWriterMode2(legacy LegacyStorage, storage Storage, dwm *dualWriterMetrics, requestInfo *request.RequestInfo, serverLockService *serverlocksvc.ServerLockService) *DualWriterMode2 {
 	return &DualWriterMode2{
 		Legacy: legacy, Storage: storage, Log: klog.NewKlogr().WithName("DualWriterMode2"), dualWriterMetrics: dwm,
-		requestInfo: requestInfo,
+		requestInfo: requestInfo, serverLockService: serverLockService,
 	}
 }
 
@@ -444,116 +447,124 @@ type syncItem struct {
 
 // Sync ...
 func (d *DualWriterMode2) Sync(ctx context.Context) error {
-	orgId := int64(1)
-
 	log := d.Log.WithValues("method", "sync", "mode", "2")
-	ctx = klog.NewContext(ctx, log)
-	ctx = identity.WithRequester(ctx, getSyncRequester(orgId))
-	ctx = request.WithNamespace(ctx, d.requestInfo.Namespace)
-	ctx = request.WithRequestInfo(ctx, d.requestInfo)
 
-	legacyList, err := d.getList(ctx, d.Legacy, &metainternalversion.ListOptions{})
-	if err != nil {
-		log.Error(err, "unable to extract list from legacy storage")
-		return err
-	}
+	err := d.serverLockService.LockExecuteAndRelease(ctx, "dualwriter mode 2 sync", time.Minute*30, func(context.Context) {
+		orgId := int64(1)
 
-	storageList, err := d.getList(ctx, d.Storage, &metainternalversion.ListOptions{})
-	if err != nil {
-		log.Error(err, "unable to extract list from storage")
-		return err
-	}
+		ctx = klog.NewContext(ctx, log)
+		ctx = identity.WithRequester(ctx, getSyncRequester(orgId))
+		ctx = request.WithNamespace(ctx, d.requestInfo.Namespace)
+		ctx = request.WithRequestInfo(ctx, d.requestInfo)
 
-	itemsByName := map[string]syncItem{}
-	for _, obj := range legacyList {
-		accessor, err := utils.MetaAccessor(obj)
+		legacyList, err := d.getList(ctx, d.Legacy, &metainternalversion.ListOptions{})
 		if err != nil {
-			log.Error(err, "error retrieving accessor data for object from legacy storage")
-			continue
+			log.Error(err, "unable to extract list from legacy storage")
+			return
 		}
-		name := accessor.GetName()
 
-		item, ok := itemsByName[name]
-		if !ok {
-			item = syncItem{}
-		}
-		item.name = name
-		item.objLegacy = obj
-		itemsByName[name] = item
-	}
-
-	for _, obj := range storageList {
-		accessor, err := utils.MetaAccessor(obj)
+		storageList, err := d.getList(ctx, d.Storage, &metainternalversion.ListOptions{})
 		if err != nil {
-			log.Error(err, "error retrieving accessor data for object from storage")
-			continue
+			log.Error(err, "unable to extract list from storage")
+			return
 		}
-		name := accessor.GetName()
 
-		item, ok := itemsByName[name]
-		if !ok {
-			item = syncItem{}
+		itemsByName := map[string]syncItem{}
+		for _, obj := range legacyList {
+			accessor, err := utils.MetaAccessor(obj)
+			if err != nil {
+				log.Error(err, "error retrieving accessor data for object from legacy storage")
+				continue
+			}
+			name := accessor.GetName()
+
+			item, ok := itemsByName[name]
+			if !ok {
+				item = syncItem{}
+			}
+			item.name = name
+			item.objLegacy = obj
+			itemsByName[name] = item
 		}
-		item.name = name
-		item.objStorage = obj
-		itemsByName[name] = item
-	}
 
-	for name, item := range itemsByName {
-		// upsert if:
-		// - existing in both legacy and storage, but objects are different, or
-		// - if it's missing from storage
-		if item.objLegacy != nil &&
-			((item.objStorage != nil && !Compare(item.objLegacy, item.objStorage)) || (item.objStorage == nil)) {
-			accessor, err := utils.MetaAccessor(item.objLegacy)
+		for _, obj := range storageList {
+			accessor, err := utils.MetaAccessor(obj)
 			if err != nil {
 				log.Error(err, "error retrieving accessor data for object from storage")
 				continue
 			}
-			accessor.SetResourceVersionInt64(0)
-			accessor.SetUID("")
+			name := accessor.GetName()
 
-			if item.objStorage != nil {
-				accessorStorage, err := utils.MetaAccessor(item.objStorage)
+			item, ok := itemsByName[name]
+			if !ok {
+				item = syncItem{}
+			}
+			item.name = name
+			item.objStorage = obj
+			itemsByName[name] = item
+		}
+
+		for name, item := range itemsByName {
+			// upsert if:
+			// - existing in both legacy and storage, but objects are different, or
+			// - if it's missing from storage
+			if item.objLegacy != nil &&
+				((item.objStorage != nil && !Compare(item.objLegacy, item.objStorage)) || (item.objStorage == nil)) {
+				accessor, err := utils.MetaAccessor(item.objLegacy)
 				if err != nil {
 					log.Error(err, "error retrieving accessor data for object from storage")
 					continue
 				}
-				accessor.SetResourceVersion(accessorStorage.GetResourceVersion())
-				accessor.SetUID(accessorStorage.GetUID())
+				accessor.SetResourceVersionInt64(0)
+				accessor.SetUID("")
+
+				if item.objStorage != nil {
+					accessorStorage, err := utils.MetaAccessor(item.objStorage)
+					if err != nil {
+						log.Error(err, "error retrieving accessor data for object from storage")
+						continue
+					}
+					accessor.SetResourceVersion(accessorStorage.GetResourceVersion())
+					accessor.SetUID(accessorStorage.GetUID())
+				}
+
+				objInfo := rest.DefaultUpdatedObjectInfo(item.objLegacy, []rest.TransformFunc{}...)
+				res, _, err := d.Storage.Update(ctx,
+					name,
+					objInfo,
+					func(ctx context.Context, obj runtime.Object) error { return nil },
+					func(ctx context.Context, obj, old runtime.Object) error { return nil },
+					true, // force creation
+					&metav1.UpdateOptions{},
+				)
+				if err != nil {
+					log.WithValues("object", res).Error(err, "could not update in storage")
+				}
 			}
 
-			objInfo := rest.DefaultUpdatedObjectInfo(item.objLegacy, []rest.TransformFunc{}...)
-			res, _, err := d.Storage.Update(ctx,
-				name,
-				objInfo,
-				func(ctx context.Context, obj runtime.Object) error { return nil },
-				func(ctx context.Context, obj, old runtime.Object) error { return nil },
-				true, // force creation
-				&metav1.UpdateOptions{},
-			)
-			if err != nil {
-				log.WithValues("object", res).Error(err, "could not update in storage")
-			}
-		}
+			// delete if object does not exists on legacy but exists on storage
+			if item.objLegacy == nil && item.objStorage != nil {
+				ctx = request.WithRequestInfo(ctx, &request.RequestInfo{
+					APIGroup:  d.requestInfo.APIGroup,
+					Resource:  d.requestInfo.Resource,
+					Name:      name,
+					Namespace: d.requestInfo.Namespace,
+				})
 
-		// delete if object does not exists on legacy but exists on storage
-		if item.objLegacy == nil && item.objStorage != nil {
-			ctx = request.WithRequestInfo(ctx, &request.RequestInfo{
-				APIGroup:  d.requestInfo.APIGroup,
-				Resource:  d.requestInfo.Resource,
-				Name:      name,
-				Namespace: d.requestInfo.Namespace,
-			})
-
-			deletedS, _, err := d.Storage.Delete(ctx, name, nil, &metav1.DeleteOptions{})
-			if err != nil {
-				if !apierrors.IsNotFound(err) {
-					log.WithValues("objectList", deletedS).Error(err, "could not delete from storage")
+				deletedS, _, err := d.Storage.Delete(ctx, name, nil, &metav1.DeleteOptions{})
+				if err != nil {
+					if !apierrors.IsNotFound(err) {
+						log.WithValues("objectList", deletedS).Error(err, "could not delete from storage")
+					}
 				}
 			}
 		}
+
+		return
+	})
+	if err != nil {
+		log.Error(err, "Server lock for dualwriter mode 2 sync already exists")
 	}
 
-	return nil
+	return err
 }

@@ -5,6 +5,10 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/grafana/grafana/pkg/infra/db"
+	serverlocksvc "github.com/grafana/grafana/pkg/infra/serverlock"
+	"github.com/grafana/grafana/pkg/infra/tracing"
+	"github.com/grafana/grafana/pkg/tests/testsuite"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -12,7 +16,21 @@ import (
 	k8srequest "k8s.io/apiserver/pkg/endpoints/request"
 )
 
+func TestMain(m *testing.M) {
+	testsuite.Run(m)
+}
+
+func createTestableServerLock(t *testing.T) *serverlocksvc.ServerLockService {
+	t.Helper()
+	store := db.InitTestDB(t)
+	svc := serverlocksvc.ProvideService(store, tracing.InitializeTracerForTest())
+
+	return svc
+}
+
 func TestSetDualWritingMode(t *testing.T) {
+	sl := createTestableServerLock(t)
+
 	type testCase struct {
 		name         string
 		stackID      string
@@ -58,7 +76,7 @@ func TestSetDualWritingMode(t *testing.T) {
 			Namespace: "default",
 		}
 
-		dw, err := SetDualWritingMode(context.Background(), kvStore, ls, us, "playlist.grafana.app/v0alpha1", tt.desiredMode, p, requestInfo)
+		dw, err := SetDualWritingMode(context.Background(), kvStore, ls, us, "playlist.grafana.app/v0alpha1", tt.desiredMode, p, requestInfo, sl)
 		assert.NoError(t, err)
 		assert.Equal(t, tt.expectedMode, dw.Mode())
 
