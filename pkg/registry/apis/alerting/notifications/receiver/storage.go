@@ -85,7 +85,12 @@ func NewStorage(
 			Namespace: namespacer(int64(1)),
 		}
 
-		return grafanarest.NewDualWriter(desiredMode, legacyStore, storage{Store: s}, reg, requestInfo, serverLockService), nil
+		return grafanarest.NewDualWriter(legacyStore, storage{Store: s}, grafanarest.DualWriterOptions{
+			Mode:              desiredMode,
+			Reg:               reg,
+			RequestInfo:       requestInfo,
+			ServerLockService: serverLockService,
+		}), nil
 	}
 	return legacyStore, nil
 }

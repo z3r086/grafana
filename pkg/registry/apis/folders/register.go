@@ -161,7 +161,12 @@ func (b *FolderAPIBuilder) GetAPIGroupInfo(
 			Namespace: b.namespacer(int64(1)),
 		}
 
-		storage[resourceInfo.StoragePath()] = grafanarest.NewDualWriter(grafanarest.Mode1, legacyStore, store, reg, requestInfo, b.serverLockService)
+		storage[resourceInfo.StoragePath()] = grafanarest.NewDualWriter(legacyStore, store, grafanarest.DualWriterOptions{
+			Mode:              grafanarest.Mode1,
+			Reg:               reg,
+			RequestInfo:       requestInfo,
+			ServerLockService: b.serverLockService,
+		})
 	}
 
 	apiGroupInfo.VersionedResourcesStorageMap[v0alpha1.VERSION] = storage

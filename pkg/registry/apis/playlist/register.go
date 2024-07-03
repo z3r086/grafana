@@ -149,7 +149,13 @@ func (b *PlaylistAPIBuilder) GetAPIGroupInfo(
 			Namespace: b.namespacer(int64(1)),
 		}
 
-		dualWriter, err := grafanarest.SetDualWritingMode(context.Background(), b.kvStore, legacyStore, store, playlist.GROUPRESOURCE, desiredMode, reg, requestInfo, b.serverLockService)
+		dualWriter, err := grafanarest.SetDualWritingMode(context.Background(), b.kvStore, legacyStore, store, playlist.GROUPRESOURCE,
+			grafanarest.DualWriterOptions{
+				Mode:              desiredMode,
+				Reg:               reg,
+				RequestInfo:       requestInfo,
+				ServerLockService: b.serverLockService,
+			})
 		if err != nil {
 			return nil, err
 		}

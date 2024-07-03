@@ -60,7 +60,12 @@ func TestSetDualWritingMode(t *testing.T) {
 			Namespace: "default",
 		}
 
-		dw, err := SetDualWritingMode(context.Background(), kvStore, ls, us, "playlist.grafana.app/v0alpha1", tt.desiredMode, p, requestInfo, sl)
+		dw, err := SetDualWritingMode(context.Background(), kvStore, ls, us, "playlist.grafana.app/v0alpha1", DualWriterOptions{
+			Mode:              tt.desiredMode,
+			Reg:               p,
+			RequestInfo:       requestInfo,
+			ServerLockService: sl,
+		})
 		assert.NoError(t, err)
 		assert.Equal(t, tt.expectedMode, dw.Mode())
 
