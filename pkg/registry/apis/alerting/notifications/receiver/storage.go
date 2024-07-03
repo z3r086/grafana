@@ -15,6 +15,7 @@ import (
 	model "github.com/grafana/grafana/pkg/apis/alerting_notifications/v0alpha1"
 	grafanaregistry "github.com/grafana/grafana/pkg/apiserver/registry/generic"
 	grafanarest "github.com/grafana/grafana/pkg/apiserver/rest"
+	serverlocksvc "github.com/grafana/grafana/pkg/infra/serverlock"
 	"github.com/grafana/grafana/pkg/services/apiserver/endpoints/request"
 	"github.com/grafana/grafana/pkg/services/apiserver/utils"
 )
@@ -36,7 +37,8 @@ func NewStorage(
 	scheme *runtime.Scheme,
 	desiredMode grafanarest.DualWriterMode,
 	optsGetter generic.RESTOptionsGetter,
-	reg prometheus.Registerer) (rest.Storage, error) {
+	reg prometheus.Registerer,
+	serverLockService *serverlocksvc.ServerLockService) (rest.Storage, error) {
 	legacyStore := &legacyStorage{
 		service:    legacySvc,
 		namespacer: namespacer,
@@ -83,7 +85,7 @@ func NewStorage(
 			Namespace: namespacer(int64(1)),
 		}
 
-		return grafanarest.NewDualWriter(desiredMode, legacyStore, storage{Store: s}, reg, requestInfo, nil), nil
+		return grafanarest.NewDualWriter(desiredMode, legacyStore, storage{Store: s}, reg, requestInfo, serverLockService), nil
 	}
 	return legacyStore, nil
 }
