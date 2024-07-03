@@ -445,6 +445,8 @@ type syncItem struct {
 
 // Sync ...
 func (d *DualWriterMode2) Sync(ctx context.Context) error {
+	startSync := time.Now()
+
 	log := d.Log.WithValues("method", "sync", "mode", "2")
 
 	err := d.serverLockService.LockExecuteAndRelease(ctx, "dualwriter mode 2 sync", time.Minute*30, func(context.Context) {
@@ -561,6 +563,8 @@ func (d *DualWriterMode2) Sync(ctx context.Context) error {
 	if err != nil {
 		log.Error(err, "Server lock for dualwriter mode 2 sync already exists")
 	}
+
+	d.recordSyncDuration(err != nil, mode2Str, startSync)
 
 	return err
 }
