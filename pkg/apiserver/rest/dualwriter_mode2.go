@@ -4,7 +4,6 @@ import (
 	"context"
 	"time"
 
-	serverlocksvc "github.com/grafana/grafana/pkg/infra/serverlock"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metainternalversion "k8s.io/apimachinery/pkg/apis/meta/internalversion"
@@ -16,7 +15,6 @@ import (
 
 	"github.com/grafana/grafana/pkg/apimachinery/identity"
 	"github.com/grafana/grafana/pkg/apimachinery/utils"
-	"github.com/grafana/grafana/pkg/infra/serverlock"
 )
 
 type DualWriterMode2 struct {
@@ -24,7 +22,7 @@ type DualWriterMode2 struct {
 	Legacy  LegacyStorage
 	*dualWriterMetrics
 	Log               klog.Logger
-	serverLockService *serverlock.ServerLockService
+	serverLockService ServerLockService
 	requestInfo       *request.RequestInfo
 }
 
@@ -32,7 +30,7 @@ const mode2Str = "2"
 
 // NewDualWriterMode2 returns a new DualWriter in mode 2.
 // Mode 2 represents writing to LegacyStorage and Storage and reading from LegacyStorage.
-func newDualWriterMode2(legacy LegacyStorage, storage Storage, dwm *dualWriterMetrics, requestInfo *request.RequestInfo, serverLockService *serverlocksvc.ServerLockService) *DualWriterMode2 {
+func newDualWriterMode2(legacy LegacyStorage, storage Storage, dwm *dualWriterMetrics, requestInfo *request.RequestInfo, serverLockService ServerLockService) *DualWriterMode2 {
 	return &DualWriterMode2{
 		Legacy: legacy, Storage: storage, Log: klog.NewKlogr().WithName("DualWriterMode2"), dualWriterMetrics: dwm,
 		requestInfo: requestInfo, serverLockService: serverLockService,
