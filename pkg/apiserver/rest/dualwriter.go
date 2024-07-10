@@ -100,10 +100,11 @@ const (
 )
 
 type DualWriterOptions struct {
-	Mode              DualWriterMode
-	Reg               prometheus.Registerer
-	RequestInfo       *request.RequestInfo
-	ServerLockService ServerLockService
+	Mode               DualWriterMode
+	Reg                prometheus.Registerer
+	RequestInfo        *request.RequestInfo
+	ServerLockService  ServerLockService
+	DataSyncJobEnabled bool
 }
 
 // TODO: make this function private as there should only be one public way of setting the dual writing mode
@@ -230,10 +231,13 @@ func SetDualWritingMode(
 	options.Mode = currentMode
 	dualWriter := NewDualWriter(legacy, storage, options)
 
-	if currentMode == Mode2 {
-		err = dualWriter.Sync(ctx)
-		if err != nil {
-			return nil, errDualWriterSetCurrentMode
+	// go from 2 to 3
+	if (options.Mode == Mode3) && (currentMode == Mode2) {
+		if options.DataSyncJobEnabled {
+			err = dualWriter.Sync(ctx)
+			if err != nil {
+				return nil, errDualWriterSetCurrentMode
+			}
 		}
 	}
 

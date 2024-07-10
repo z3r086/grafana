@@ -37,6 +37,7 @@ type PlaylistAPIBuilder struct {
 	gv                schema.GroupVersion
 	kvStore           *kvstore.NamespacedKVStore
 	serverLockService *serverlocksvc.ServerLockService
+	cfg               *setting.Cfg
 }
 
 func RegisterAPIService(p playlistsvc.Service,
@@ -52,6 +53,7 @@ func RegisterAPIService(p playlistsvc.Service,
 		gv:                playlist.PlaylistResourceInfo.GroupVersion(),
 		kvStore:           kvstore.WithNamespace(kvStore, 0, "storage.dualwriting"),
 		serverLockService: serverLockService,
+		cfg:               cfg,
 		// register:  newMetrics(registerer),
 	}
 	apiregistration.RegisterAPI(builder)
@@ -151,10 +153,11 @@ func (b *PlaylistAPIBuilder) GetAPIGroupInfo(
 
 		dualWriter, err := grafanarest.SetDualWritingMode(context.Background(), b.kvStore, legacyStore, store, playlist.GROUPRESOURCE,
 			grafanarest.DualWriterOptions{
-				Mode:              desiredMode,
-				Reg:               reg,
-				RequestInfo:       requestInfo,
-				ServerLockService: b.serverLockService,
+				Mode:               desiredMode,
+				Reg:                reg,
+				RequestInfo:        requestInfo,
+				ServerLockService:  b.serverLockService,
+				DataSyncJobEnabled: b.cfg.SectionWithEnvOverrides("unified_storage_data_sync_job_enabled").Key(playlist.GROUPRESOURCE).MustBool(false),
 			})
 		if err != nil {
 			return nil, err
