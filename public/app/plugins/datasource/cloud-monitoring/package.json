@@ -17,7 +17,7 @@
     "immer": "10.1.1",
     "lodash": "4.17.21",
     "monaco-editor": "0.34.1",
-    "prismjs": "1.29.0",
+    "prismjs": "1.30.0",
     "react": "18.2.0",
     "react-dom": "18.2.0",
     "react-select": "5.8.0",
@@ -44,7 +44,7 @@
     "react-test-renderer": "18.2.0",
     "ts-node": "10.9.2",
     "typescript": "5.4.5",
-    "webpack": "5.91.0"
+    "webpack": "5.94.0"
   },
   "peerDependencies": {
     "@grafana/runtime": "*"
