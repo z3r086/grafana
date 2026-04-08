@@ -23,7 +23,7 @@
     "buffer": "6.0.3",
     "events": "3.3.0",
     "i18next": "^23.0.0",
-    "lodash": "4.17.21",
+    "lodash": "4.18.1",
     "lru-cache": "10.2.2",
     "monaco-editor": "0.34.1",
     "prismjs": "1.29.0",
@@ -56,7 +56,7 @@
     "react-select-event": "5.5.1",
     "ts-node": "10.9.2",
     "typescript": "5.4.5",
-    "webpack": "5.91.0"
+    "webpack": "5.104.1"
   },
   "peerDependencies": {
     "@grafana/runtime": "*"
